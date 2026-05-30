@@ -37,6 +37,39 @@ class QinglongViewModel(application: Application) : AndroidViewModel(application
     init {
         val database = AppDatabase.getDatabase(application)
         repository = QinglongConfigRepository(database.qinglongConfigDao())
+        
+        // Automatically pre-populate default configurations if they don't exist
+        viewModelScope.launch(Dispatchers.IO) {
+            val existingConfigs = repository.getAllConfigsList()
+            if (existingConfigs.isEmpty()) {
+                repository.insert(
+                    QinglongConfig(
+                        name = "252",
+                        url = "http://4995.408008.xyz:5700/",
+                        clientId = "ExXyDn-gAD8z",
+                        clientSecret = "_mhdMfLtVjv3IsyLut9gmerC"
+                    )
+                )
+                repository.insert(
+                    QinglongConfig(
+                        name = "45",
+                        url = "http://4995.408008.xyz:5701/",
+                        clientId = "-z-Lkhlu65P_",
+                        clientSecret = "_dMrXo6IJ6Ivr1oYa_d8w_gp5"
+                    )
+                )
+            } else {
+                // If configurations already exist, migrate the old URLs to the new ones
+                for (config in existingConfigs) {
+                    if (config.name == "252" && config.url == "http://192.168.2.252:15700/") {
+                        repository.update(config.copy(url = "http://4995.408008.xyz:5700/"))
+                    } else if (config.name == "45" && config.url == "http://192.168.2.45:5700/") {
+                        repository.update(config.copy(url = "http://4995.408008.xyz:5701/"))
+                    }
+                }
+            }
+        }
+
         configs = repository.allConfigs.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
@@ -94,86 +127,95 @@ class QinglongViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun checkAndExtractCookies() {
-        val domains = listOf(
-            "https://plogin.m.jd.com",
-            "https://m.jd.com",
-            "https://jd.com",
-            "https://home.m.jd.com"
-        )
-        val cookieManager = CookieManager.getInstance()
-        var foundKey: String? = null
-        var foundPin: String? = null
-        
-        for (domain in domains) {
-            val cookies = cookieManager.getCookie(domain) ?: continue
-            val parts = cookies.split(";").map { it.trim() }
-            for (part in parts) {
-                val keyPair = part.split("=", limit = 2)
-                if (keyPair.size == 2) {
-                    val keyName = keyPair[0].trim()
-                    val keyValue = keyPair[1].trim()
-                    if (keyName == "pt_key" && keyValue.isNotEmpty() && keyValue != "null") {
-                        foundKey = keyValue
-                    }
-                    if (keyName == "pt_pin" && keyValue.isNotEmpty() && keyValue != "null") {
-                        foundPin = keyValue
+        try {
+            val domains = listOf(
+                "https://plogin.m.jd.com",
+                "https://m.jd.com",
+                "https://jd.com",
+                "https://home.m.jd.com"
+            )
+            val cookieManager = CookieManager.getInstance()
+            var foundKey: String? = null
+            var foundPin: String? = null
+            
+            for (domain in domains) {
+                val cookies = cookieManager.getCookie(domain) ?: continue
+                val parts = cookies.split(";").map { it.trim() }
+                for (part in parts) {
+                    val keyPair = part.split("=", limit = 2)
+                    if (keyPair.size == 2) {
+                        val keyName = keyPair[0].trim()
+                        val keyValue = keyPair[1].trim()
+                        if (keyName == "pt_key" && keyValue.isNotEmpty() && keyValue != "null") {
+                            foundKey = keyValue
+                        }
+                        if (keyName == "pt_pin" && keyValue.isNotEmpty() && keyValue != "null") {
+                            foundPin = keyValue
+                        }
                     }
                 }
+                if (foundKey != null && foundPin != null) {
+                    break
+                }
             }
+            
             if (foundKey != null && foundPin != null) {
-                break
+                val formatted = "pt_key=$foundKey;pt_pin=$foundPin;"
+                if (_currentCookie.value != formatted) {
+                    _currentCookie.value = formatted
+                    _ptPin.value = foundPin
+                    addLog("成功自动捕获 Cookie: pt_pin=$foundPin", isError = false)
+                }
             }
-        }
-        
-        if (foundKey != null && foundPin != null) {
-            val formatted = "pt_key=$foundKey;pt_pin=$foundPin;"
-            if (_currentCookie.value != formatted) {
-                _currentCookie.value = formatted
-                _ptPin.value = foundPin
-                addLog("成功自动捕获 Cookie: pt_pin=$foundPin", isError = false)
-            }
+        } catch (e: Exception) {
+            Log.e("QinglongViewModel", "checkAndExtractCookies failed: ${e.message}")
         }
     }
 
     fun forceExtractCookiesManual() {
-        val domains = listOf(
-            "https://plogin.m.jd.com",
-            "https://m.jd.com",
-            "https://jd.com",
-            "https://home.m.jd.com"
-        )
-        val cookieManager = CookieManager.getInstance()
-        var foundKey: String? = null
-        var foundPin: String? = null
-        
-        for (domain in domains) {
-            val cookies = cookieManager.getCookie(domain) ?: continue
-            val parts = cookies.split(";").map { it.trim() }
-            for (part in parts) {
-                val keyPair = part.split("=", limit = 2)
-                if (keyPair.size == 2) {
-                    val keyName = keyPair[0].trim()
-                    val keyValue = keyPair[1].trim()
-                    if (keyName == "pt_key" && keyValue.isNotEmpty() && keyValue != "null") {
-                        foundKey = keyValue
-                    }
-                    if (keyName == "pt_pin" && keyValue.isNotEmpty() && keyValue != "null") {
-                        foundPin = keyValue
+        try {
+            val domains = listOf(
+                "https://plogin.m.jd.com",
+                "https://m.jd.com",
+                "https://jd.com",
+                "https://home.m.jd.com"
+            )
+            val cookieManager = CookieManager.getInstance()
+            var foundKey: String? = null
+            var foundPin: String? = null
+            
+            for (domain in domains) {
+                val cookies = cookieManager.getCookie(domain) ?: continue
+                val parts = cookies.split(";").map { it.trim() }
+                for (part in parts) {
+                    val keyPair = part.split("=", limit = 2)
+                    if (keyPair.size == 2) {
+                        val keyName = keyPair[0].trim()
+                        val keyValue = keyPair[1].trim()
+                        if (keyName == "pt_key" && keyValue.isNotEmpty() && keyValue != "null") {
+                            foundKey = keyValue
+                        }
+                        if (keyName == "pt_pin" && keyValue.isNotEmpty() && keyValue != "null") {
+                            foundPin = keyValue
+                        }
                     }
                 }
+                if (foundKey != null && foundPin != null) {
+                    break
+                }
             }
+            
             if (foundKey != null && foundPin != null) {
-                break
+                val formatted = "pt_key=$foundKey;pt_pin=$foundPin;"
+                _currentCookie.value = formatted
+                _ptPin.value = foundPin
+                addLog("获取 Cookies 成功: pt_pin=$foundPin", isError = false)
+            } else {
+                addLog("获取 Cookies 失败: 浏览器中未发现完整的 pt_key 和 pt_pin", isError = true)
             }
-        }
-        
-        if (foundKey != null && foundPin != null) {
-            val formatted = "pt_key=$foundKey;pt_pin=$foundPin;"
-            _currentCookie.value = formatted
-            _ptPin.value = foundPin
-            addLog("获取 Cookies 成功: pt_pin=$foundPin", isError = false)
-        } else {
-            addLog("获取 Cookies 失败: 浏览器中未发现完整的 pt_key 和 pt_pin", isError = true)
+        } catch (e: Exception) {
+            addLog("手动提取 Cookie 失败: ${e.message}", isError = true)
+            Log.e("QinglongViewModel", "forceExtractCookiesManual failed: ${e.message}")
         }
     }
 

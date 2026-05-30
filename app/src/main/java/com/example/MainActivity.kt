@@ -906,15 +906,15 @@ fun ConfigEditDialog(
     onSave: (QinglongConfig) -> Unit,
     onTest: (QinglongConfig, (Boolean, String) -> Unit) -> Unit
 ) {
-    var name by remember { mutableStateOf(config?.name ?: "") }
-    var url by remember { mutableStateOf(config?.url ?: "") }
-    var clientId by remember { mutableStateOf(config?.clientId ?: "") }
-    var clientSecret by remember { mutableStateOf(config?.clientSecret ?: "") }
+    var name by remember(config) { mutableStateOf(config?.name ?: "") }
+    var url by remember(config) { mutableStateOf(config?.url ?: "") }
+    var clientId by remember(config) { mutableStateOf(config?.clientId ?: "") }
+    var clientSecret by remember(config) { mutableStateOf(config?.clientSecret ?: "") }
 
-    var isSecretVisible by remember { mutableStateOf(false) }
-    var isTestingInProgress by remember { mutableStateOf(false) }
-    var testFeedbackStr by remember { mutableStateOf("") }
-    var testFeedbackIsError by remember { mutableStateOf(false) }
+    var isSecretVisible by remember(config) { mutableStateOf(false) }
+    var isTestingInProgress by remember(config) { mutableStateOf(false) }
+    var testFeedbackStr by remember(config) { mutableStateOf("") }
+    var testFeedbackIsError by remember(config) { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -1061,7 +1061,12 @@ fun ConfigEditDialog(
                 ) {
                     Button(
                         onClick = {
-                            if (name.isBlank() || url.isBlank() || clientId.isBlank() || clientSecret.isBlank()) {
+                            val cleanName = name.trim().replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+                            val cleanUrl = url.trim().replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+                            val cleanClientId = clientId.trim().replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+                            val cleanClientSecret = clientSecret.trim().replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+
+                            if (cleanName.isBlank() || cleanUrl.isBlank() || cleanClientId.isBlank() || cleanClientSecret.isBlank()) {
                                 testFeedbackIsError = true
                                 testFeedbackStr = "请完成所有必填字段。"
                                 return@Button
@@ -1070,10 +1075,10 @@ fun ConfigEditDialog(
                             testFeedbackStr = "正在连接并鉴权..."
                             val tempConfig = QinglongConfig(
                                 id = config?.id ?: 0,
-                                name = name,
-                                url = url,
-                                clientId = clientId,
-                                clientSecret = clientSecret
+                                name = cleanName,
+                                url = cleanUrl,
+                                clientId = cleanClientId,
+                                clientSecret = cleanClientSecret
                             )
                             onTest(tempConfig) { success, msg ->
                                 isTestingInProgress = false
@@ -1094,7 +1099,12 @@ fun ConfigEditDialog(
 
                     Button(
                         onClick = {
-                            if (name.isBlank() || url.isBlank() || clientId.isBlank() || clientSecret.isBlank()) {
+                            val cleanName = name.trim().replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+                            val cleanUrl = url.trim().replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+                            val cleanClientId = clientId.trim().replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+                            val cleanClientSecret = clientSecret.trim().replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+
+                            if (cleanName.isBlank() || cleanUrl.isBlank() || cleanClientId.isBlank() || cleanClientSecret.isBlank()) {
                                 testFeedbackIsError = true
                                 testFeedbackStr = "所有字段都必须填写！"
                                 return@Button
@@ -1102,10 +1112,10 @@ fun ConfigEditDialog(
                             onSave(
                                 QinglongConfig(
                                     id = config?.id ?: 0,
-                                    name = name,
-                                    url = url,
-                                    clientId = clientId,
-                                    clientSecret = clientSecret
+                                    name = cleanName,
+                                    url = cleanUrl,
+                                    clientId = cleanClientId,
+                                    clientSecret = cleanClientSecret
                                 )
                             )
                         },

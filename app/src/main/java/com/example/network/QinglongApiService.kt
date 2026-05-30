@@ -31,8 +31,22 @@ class QinglongApiService {
     }
 
     suspend fun getToken(baseUrl: String, clientId: String, clientSecret: String): Result<Pair<String, String>> {
+        val cleanClientId = clientId.trim()
+            .replace("\u200b", "")
+            .replace("\u200c", "")
+            .replace("\u200d", "")
+            .replace("\ufeff", "")
+        val cleanClientSecret = clientSecret.trim()
+            .replace("\u200b", "")
+            .replace("\u200c", "")
+            .replace("\u200d", "")
+            .replace("\ufeff", "")
         val formattedUrl = formatUrl(baseUrl)
-        val url = "$formattedUrl/open/auth/token?client_id=$clientId&client_secret=$clientSecret"
+        
+        val encodedId = java.net.URLEncoder.encode(cleanClientId, "UTF-8")
+        val encodedSecret = java.net.URLEncoder.encode(cleanClientSecret, "UTF-8")
+        
+        val url = "$formattedUrl/open/auth/token?client_id=$encodedId&client_secret=$encodedSecret"
         val request = Request.Builder()
             .url(url)
             .get()
@@ -46,17 +60,33 @@ class QinglongApiService {
                     return Result.failure(IOException("HTTP Error: ${response.code}"))
                 }
                 val json = JSONObject(bodyStr)
+                
+                var token = ""
+                var tokenType = "Bearer"
+                
+                // 1. Try parsing "data" as a JSONObject
                 val dataObj = json.optJSONObject("data")
                 if (dataObj != null) {
-                    val token = dataObj.optString("token", "")
-                    val tokenType = dataObj.optString("token_type", "Bearer")
-                    if (token.isNotEmpty()) {
-                        Result.success(Pair(tokenType, token))
-                    } else {
-                        Result.failure(Exception("接口返回不含 token 字段"))
+                    token = dataObj.optString("token", "")
+                    tokenType = dataObj.optString("token_type", "Bearer").takeIf { it.isNotEmpty() } ?: "Bearer"
+                } else if (json.has("data")) {
+                    // 2. Try parsing "data" as a direct String value containing the token
+                    val dataStr = json.optString("data", "")
+                    if (dataStr.isNotEmpty() && dataStr != "null" && !dataStr.startsWith("{")) {
+                        token = dataStr
                     }
+                }
+                
+                // 3. Fallback: Parse token directly from root fields if still empty
+                if (token.isEmpty()) {
+                    token = json.optString("token", "")
+                    tokenType = json.optString("token_type", "Bearer").takeIf { it.isNotEmpty() } ?: "Bearer"
+                }
+                
+                if (token.isNotEmpty()) {
+                    Result.success(Pair(tokenType, token))
                 } else {
-                    Result.failure(Exception("接口返回不含 data 字段"))
+                    Result.failure(Exception("接口返回不含有效 Token。完整返回: $bodyStr"))
                 }
             }
         } catch (e: Exception) {
@@ -113,17 +143,28 @@ class QinglongApiService {
             val mediaType = "application/json; charset=utf-8".toMediaType()
             if (existingEnv != null) {
                 // Update environment variable
-                val envId = existingEnv!!.optString("id").takeIf { it.isNotEmpty() } 
-                    ?: existingEnv!!.optString("_id")
-                    
                 val remarks = existingEnv!!.optString("remarks", ptPin)
                 
                 val putBody = JSONObject().apply {
-                    put("id", envId) // provide both key names for version compatibility
-                    put("_id", envId)
                     put("name", "JD_COOKIE")
                     put("value", cookieValue)
-                    put("remarks", remarks)
+                    if (remarks.isNotEmpty()) {
+                        put("remarks", remarks)
+                    }
+                    
+                    // Crucial: Only include the ID field that exists in the original item
+                    // to prevent Joi schema validation 400 errors about unexpected keys.
+                    // Also preserve the exact original type (Integer/Long vs String).
+                    if (existingEnv!!.has("id")) {
+                        put("id", existingEnv!!.get("id"))
+                    } else if (existingEnv!!.has("_id")) {
+                        put("_id", existingEnv!!.get("_id"))
+                    } else {
+                        // Fallback
+                        val envId = existingEnv!!.optString("id").takeIf { it.isNotEmpty() } 
+                            ?: existingEnv!!.optString("_id")
+                        put("id", envId)
+                    }
                 }
                 
                 val putUrl = "$formattedBaseUrl/open/envs"
@@ -144,11 +185,19 @@ class QinglongApiService {
                 // Now enable it
                 val enableUrl = "$formattedBaseUrl/open/envs/enable"
                 val enableArray = JSONArray().apply {
-                    val longId = envId.toLongOrNull()
-                    if (longId != null) {
-                        put(longId)
+                    if (existingEnv!!.has("id")) {
+                        put(existingEnv!!.get("id"))
+                    } else if (existingEnv!!.has("_id")) {
+                        put(existingEnv!!.get("_id"))
                     } else {
-                        put(envId)
+                        val envId = existingEnv!!.optString("id").takeIf { it.isNotEmpty() } 
+                            ?: existingEnv!!.optString("_id")
+                        val longId = envId.toLongOrNull()
+                        if (longId != null) {
+                            put(longId)
+                        } else {
+                            put(envId)
+                        }
                     }
                 }
                 
