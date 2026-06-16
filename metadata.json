@@ -1,5 +1,5 @@
 {
-  "name": "青龙京东助手",
+  "name": "swfz2013",
   "description": "使用 Kotlin + Android WebView 提取京东 Cookie 并一键同步/更新到青龙面板环境变量。",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

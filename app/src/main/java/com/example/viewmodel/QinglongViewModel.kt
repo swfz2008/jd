@@ -6,6 +6,7 @@ import android.webkit.CookieManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
+import com.example.data.JDCredential
 import com.example.data.QinglongConfig
 import com.example.data.QinglongConfigRepository
 import com.example.network.QinglongApiService
@@ -33,10 +34,14 @@ class QinglongViewModel(application: Application) : AndroidViewModel(application
     private val repository: QinglongConfigRepository
     
     val configs: StateFlow<List<QinglongConfig>>
+    val credentials: StateFlow<List<JDCredential>>
 
     init {
         val database = AppDatabase.getDatabase(application)
-        repository = QinglongConfigRepository(database.qinglongConfigDao())
+        repository = QinglongConfigRepository(
+            database.qinglongConfigDao(),
+            database.jdCredentialDao()
+        )
         
         // Automatically pre-populate default configurations if they don't exist
         viewModelScope.launch(Dispatchers.IO) {
@@ -71,6 +76,12 @@ class QinglongViewModel(application: Application) : AndroidViewModel(application
         }
 
         configs = repository.allConfigs.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = emptyList()
+        )
+
+        credentials = repository.allCredentials.stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = emptyList()
@@ -314,6 +325,33 @@ class QinglongViewModel(application: Application) : AndroidViewModel(application
                 } else {
                     onComplete(false, result.exceptionOrNull()?.message ?: "未知错误")
                 }
+            }
+        }
+    }
+
+    fun addCredential(credential: JDCredential) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.insertCredential(credential)
+            withContext(Dispatchers.Main) {
+                addLog("已保存账号密码: ${credential.username}", isError = false)
+            }
+        }
+    }
+
+    fun updateCredential(credential: JDCredential) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateCredential(credential)
+            withContext(Dispatchers.Main) {
+                addLog("已更新账号密码: ${credential.username}", isError = false)
+            }
+        }
+    }
+
+    fun deleteCredential(credential: JDCredential) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteCredential(credential)
+            withContext(Dispatchers.Main) {
+                addLog("已删除账号密码: ${credential.username}", isError = false)
             }
         }
     }

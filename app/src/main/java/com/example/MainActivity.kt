@@ -89,6 +89,8 @@ fun MainScreen(
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var showConfigListDialog by remember { mutableStateOf(false) }
+    var showCredentialsDialog by remember { mutableStateOf(false) }
+    val savedCredentials by viewModel.credentials.collectAsState()
 
     // Start auto cookie Extraction Poller loop
     LaunchedEffect(Unit) {
@@ -184,6 +186,22 @@ fun MainScreen(
                         )
                     }
 
+                    // Account Credentials IconButton
+                    IconButton(
+                        onClick = { showCredentialsDialog = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .testTag("toolbar_credentials_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AccountCircle,
+                            contentDescription = "JD Credentials",
+                            tint = Slate600,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
                     // Settings IconButton
                     IconButton(
                         onClick = { showConfigListDialog = true },
@@ -252,8 +270,64 @@ fun MainScreen(
                             color = Slate500
                         ),
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
+
+                    var showSelectCredentialsDropdown by remember { mutableStateOf(false) }
+
+                    Box {
+                        TextButton(
+                            onClick = {
+                                if (savedCredentials.isEmpty()) {
+                                    showCredentialsDialog = true
+                                    viewModel.addLog("请先添加自动登录账号！", isError = true)
+                                } else if (savedCredentials.size == 1) {
+                                    val cred = savedCredentials.first()
+                                    executeQuickLogin(webViewInstance, cred.username, cred.password, viewModel)
+                                } else {
+                                    showSelectCredentialsDropdown = true
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Person,
+                                contentDescription = "Quick login",
+                                modifier = Modifier.size(14.dp),
+                                tint = Blue600
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "快速登录",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = Blue600
+                                )
+                            )
+                        }
+
+                        DropdownMenu(
+                            expanded = showSelectCredentialsDropdown,
+                            onDismissRequest = { showSelectCredentialsDropdown = false }
+                        ) {
+                            savedCredentials.forEach { cred ->
+                                val displayName = if (cred.remark.isNotEmpty()) {
+                                    "${cred.username} (${cred.remark})"
+                                } else {
+                                    cred.username
+                                }
+                                DropdownMenuItem(
+                                    text = { Text(displayName) },
+                                    onClick = {
+                                        showSelectCredentialsDropdown = false
+                                        executeQuickLogin(webViewInstance, cred.username, cred.password, viewModel)
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
                 HorizontalDivider(color = Slate100, thickness = 1.dp)
 
@@ -563,6 +637,17 @@ fun MainScreen(
             onDelete = { viewModel.deleteConfig(it) },
             onTest = { config, cb -> viewModel.testConfigConnection(config, cb) },
             viewModel = viewModel
+        )
+    }
+
+    // Credentials Dialog Manager
+    if (showCredentialsDialog) {
+        JDCredentialsDialog(
+            credentials = savedCredentials,
+            onClose = { showCredentialsDialog = false },
+            onAdd = { viewModel.addCredential(it) },
+            onUpdate = { viewModel.updateCredential(it) },
+            onDelete = { viewModel.deleteCredential(it) }
         )
     }
 }
@@ -1137,6 +1222,541 @@ fun ConfigEditDialog(
                     border = BorderStroke(1.dp, Slate200)
                 ) {
                     Text("取消")
+                }
+            }
+        }
+    }
+}
+
+// executeQuickLogin helper function
+fun executeQuickLogin(webView: WebView?, u: String, p: String, viewModel: QinglongViewModel) {
+    if (webView == null) {
+        viewModel.addLog("浏览器实例尚未载入", isError = true)
+        return
+    }
+    viewModel.addLog("正在通过 ${u} 执行快速登录...", isError = false)
+    
+    val escapedUsername = u.replace("\\", "\\\\").replace("'", "\\'").replace("\"", "\\\"").replace("\n", "")
+    val escapedPassword = p.replace("\\", "\\\\").replace("'", "\\'").replace("\"", "\\\"").replace("\n", "")
+    
+    val js = """
+        (function() {
+            var tabTexts = ["账号密码登录", "密码登录", "账户登录"];
+            var tags = ["span", "div", "a", "p", "h4", "li"];
+            var tabFound = false;
+            
+            for (var t = 0; t < tags.length; t++) {
+                var elms = document.getElementsByTagName(tags[t]);
+                for (var i = 0; i < elms.length; i++) {
+                    var txt = elms[i].innerText ? elms[i].innerText.trim() : "";
+                    if (tabTexts.indexOf(txt) !== -1 || txt === "密码登录" || txt === "账号密码登录") {
+                        try {
+                            if (txt.indexOf("忘记") === -1) {
+                                elms[i].click();
+                                tabFound = true;
+                                break;
+                            }
+                        } catch(e) {}
+                    }
+                }
+                if (tabFound) break;
+            }
+            
+            if (!tabFound) {
+                var q = document.querySelector(".password-login") || 
+                        document.querySelector(".tab-item:nth-child(2)") ||
+                        document.querySelector(".login-tab-item");
+                if (q) {
+                    try {
+                        q.click();
+                        tabFound = true;
+                    } catch(e) {}
+                }
+            }
+
+            function fillForm() {
+                var usernameInput = document.getElementById("username") || 
+                                    document.querySelector("input[type='text']") || 
+                                    document.querySelector("input[placeholder*='账号']") || 
+                                    document.querySelector("input[placeholder*='用户名']") ||
+                                    document.querySelector("input[placeholder*='手机']");
+                                    
+                var passwordInput = document.getElementById("password") || 
+                                    document.getElementById("pwd") || 
+                                    document.querySelector("input[type='password']") || 
+                                    document.querySelector("input[placeholder*='密码']");
+
+                if (usernameInput) {
+                    usernameInput.value = "$escapedUsername";
+                    usernameInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    usernameInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                if (passwordInput) {
+                    passwordInput.value = "$escapedPassword";
+                    passwordInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    passwordInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+
+            function tickAgreement() {
+                var checkboxes = document.querySelectorAll("input[type='checkbox']");
+                for (var i = 0; i < checkboxes.length; i++) {
+                    if (!checkboxes[i].checked) {
+                        try {
+                            checkboxes[i].click();
+                            checkboxes[i].checked = true;
+                            checkboxes[i].dispatchEvent(new Event('change', { bubbles: true }));
+                        } catch(e) {}
+                    }
+                }
+                
+                var selectors = [
+                    ".policy_checkbox",
+                    ".icon-uncheck",
+                    ".uncheck",
+                    ".chk-agree",
+                    "[class*='agree']",
+                    "[class*='policy']",
+                    "[class*='protocol']",
+                    "[class*='checkbox']"
+                ];
+                
+                for (var s = 0; s < selectors.length; s++) {
+                    try {
+                        var visualElms = document.querySelectorAll(selectors[s]);
+                        for (var j = 0; j < visualElms.length; j++) {
+                            var el = visualElms[j];
+                            var tag = el.tagName.toLowerCase();
+                            if (tag === 'a' || el.innerText.indexOf("《") !== -1 || el.innerText.indexOf("协议") !== -1) {
+                                continue;
+                            }
+                            var classStr = el.className || "";
+                            if (classStr.indexOf("agree") !== -1 || classStr.indexOf("uncheck") !== -1 || classStr.indexOf("policy") !== -1 || tag === 'input') {
+                                el.click();
+                            }
+                        }
+                    } catch(e) {}
+                }
+            }
+
+            function clickSubmit() {
+                var loginBtns = [
+                    document.getElementById("loginBtn"),
+                    document.querySelector(".btn-login"),
+                    document.querySelector(".login-btn"),
+                    document.querySelector("[class*='btn-login']"),
+                    document.querySelector(".log-btn"),
+                    document.querySelector("button[type='submit']")
+                ];
+                for (var b = 0; b < loginBtns.length; b++) {
+                    if (loginBtns[b]) {
+                        try {
+                            loginBtns[b].click();
+                            return true;
+                        } catch(e) {}
+                    }
+                }
+                
+                var btnTexts = ["登录", "一键登录", "同意协议并登录", "确认并登录"];
+                var buttonTags = ["button", "a", "div", "span"];
+                for (var t = 0; t < buttonTags.length; t++) {
+                    var elms = document.getElementsByTagName(buttonTags[t]);
+                    for (var i = 0; i < elms.length; i++) {
+                        var txt = elms[i].innerText ? elms[i].innerText.trim() : "";
+                        if (btnTexts.indexOf(txt) !== -1) {
+                            if (elms[i].className.indexOf("tab") === -1 && elms[i].className.indexOf("nav") === -1) {
+                                try {
+                                    elms[i].click();
+                                    return true;
+                                } catch(e) {}
+                            }
+                        }
+                    }
+                }
+                return false;
+            }
+
+            fillForm();
+            setTimeout(fillForm, 100);
+            
+            setTimeout(function() {
+                tickAgreement();
+                setTimeout(clickSubmit, 300);
+            }, 600);
+        })()
+    """.trimIndent()
+    
+    webView.evaluateJavascript(js, null)
+}
+
+// JD Credentials Dialog for managing Login Accounts
+@Composable
+fun JDCredentialsDialog(
+    credentials: List<com.example.data.JDCredential>,
+    onClose: () -> Unit,
+    onAdd: (com.example.data.JDCredential) -> Unit,
+    onUpdate: (com.example.data.JDCredential) -> Unit,
+    onDelete: (com.example.data.JDCredential) -> Unit
+) {
+    var showEditDialog by remember { mutableStateOf(false) }
+    var activeCredentialToEdit by remember { mutableStateOf<com.example.data.JDCredential?>(null) }
+
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White,
+            tonalElevation = 4.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "快速登录账号管理",
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Slate900
+                        )
+                    )
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Slate100, shape = CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Slate600,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    if (credentials.isEmpty()) {
+                        Column(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccountCircle,
+                                contentDescription = "No credentials",
+                                modifier = Modifier.size(48.dp),
+                                tint = Slate400
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "暂无保存的登录账号",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = FontWeight.Medium,
+                                    color = Slate600
+                                )
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "点击下方按钮添加一个，后续即可一键自动填充登录",
+                                style = MaterialTheme.typography.bodySmall.copy(color = Slate400)
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(credentials) { cred ->
+                                CredentialCard(
+                                    credential = cred,
+                                    onEdit = {
+                                        activeCredentialToEdit = cred
+                                        showEditDialog = true
+                                    },
+                                    onDelete = { onDelete(cred) }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            activeCredentialToEdit = null
+                            showEditDialog = true
+                        },
+                        modifier = Modifier.weight(1.4f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Blue600)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Add Account", modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("新增账号", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                    }
+
+                    OutlinedButton(
+                        onClick = onClose,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Slate600),
+                        border = BorderStroke(1.dp, Slate200)
+                    ) {
+                        Text("关闭")
+                    }
+                }
+            }
+        }
+    }
+
+    if (showEditDialog) {
+        CredentialEditDialog(
+            credential = activeCredentialToEdit,
+            onDismiss = { showEditDialog = false },
+            onSave = { saved ->
+                if (saved.id == 0) {
+                    onAdd(saved)
+                } else {
+                    onUpdate(saved)
+                }
+                showEditDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+fun CredentialCard(
+    credential: com.example.data.JDCredential,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Slate200)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = credential.username,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Slate900
+                        )
+                    )
+                    if (credential.remark.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "备注: ${credential.remark}",
+                            style = MaterialTheme.typography.bodySmall.copy(color = Blue600, fontWeight = FontWeight.Medium)
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit Account",
+                            tint = Blue600,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                        Icon(
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete Account",
+                            tint = Red600,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CredentialEditDialog(
+    credential: com.example.data.JDCredential?,
+    onDismiss: () -> Unit,
+    onSave: (com.example.data.JDCredential) -> Unit
+) {
+    var username by remember(credential) { mutableStateOf(credential?.username ?: "") }
+    var password by remember(credential) { mutableStateOf(credential?.password ?: "") }
+    var remark by remember(credential) { mutableStateOf(credential?.remark ?: "") }
+
+    var isPasswordVisible by remember { mutableStateOf(false) }
+    var errorStr by remember { mutableStateOf("") }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentHeight(),
+            shape = RoundedCornerShape(16.dp),
+            color = Color.White,
+            tonalElevation = 6.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = if (credential == null) "添加登录账号" else "编辑登录账号",
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Slate900
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = username,
+                    onValueChange = { 
+                        username = it 
+                        errorStr = ""
+                    },
+                    label = { Text("京东用户名 / 手机号 / 邮箱", color = Slate500) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Blue600,
+                        unfocusedBorderColor = Slate200,
+                        focusedLabelColor = Blue600,
+                        unfocusedLabelColor = Slate500
+                    ),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { 
+                        password = it 
+                        errorStr = ""
+                    },
+                    label = { Text("密码", color = Slate500) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Blue600,
+                        unfocusedBorderColor = Slate200,
+                        focusedLabelColor = Blue600,
+                        unfocusedLabelColor = Slate500
+                    ),
+                    singleLine = true,
+                    visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                            Icon(
+                                imageVector = if (isPasswordVisible) Icons.Default.Info else Icons.Default.Lock,
+                                contentDescription = if (isPasswordVisible) "Hide Password" else "Show Password",
+                                tint = Slate500
+                            )
+                        }
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedTextField(
+                    value = remark,
+                    onValueChange = { remark = it },
+                    label = { Text("备注标签 (非必填，例如: 主账号)", color = Slate500) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Blue600,
+                        unfocusedBorderColor = Slate200,
+                        focusedLabelColor = Blue600,
+                        unfocusedLabelColor = Slate500
+                    ),
+                    singleLine = true
+                )
+
+                if (errorStr.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = errorStr,
+                        color = Color.Red,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Slate600),
+                        border = BorderStroke(1.dp, Slate200)
+                    ) {
+                        Text("取消")
+                    }
+
+                    Button(
+                        onClick = {
+                            if (username.isBlank() || password.isBlank()) {
+                                errorStr = "用户名和密码不能为空！"
+                                return@Button
+                            }
+                            onSave(
+                                com.example.data.JDCredential(
+                                    id = credential?.id ?: 0,
+                                    username = username.trim(),
+                                    password = password,
+                                    remark = remark.trim()
+                                )
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Blue600)
+                    ) {
+                        Text("保存", style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold))
+                    }
                 }
             }
         }
